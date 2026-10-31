@@ -1,0 +1,125 @@
+name: Prepare bibliography update 2026-10-31
+on:
+  push:
+    branches: [actualizar-publicaciones-2026-10-31]
+    paths: [.github/workflows/preparar-publicaciones-2026-10-31.yml]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: actualizar-publicaciones-2026-10-31
+      - name: Update and validate bibliography without changing main
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, json, hashlib
+          p = Path('index.html')
+          raw = p.read_bytes()
+          blob = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+          assert blob == '777ed2cd254dba6d0f9510749655439c3f1e2b45', 'Baseline changed; stop without writing'
+          before = raw.decode('utf-8')
+          s = before
+          new_doi = '10.1080/29933935.2026.2747503'
+          old_doi = '10.1186/s42523-026-00633-x'
+          title = 'Gut microbiota profile in school-aged children with vitamin A depletion and vitamin E deficiency: A cross-sectional study'
+          def papers(text):
+              return re.findall(r'<article class="paper"[^>]*>.*?</article>', text, re.S)
+          def doi(article):
+              m = re.search(r'<h3><a href="https://doi.org/([^\"]+)"', article)
+              return m[1].lower() if m else None
+          def without_index(article):
+              return re.sub(r'(<span class="paper-index" aria-hidden="true">)\d+(</span>)', r'\1INDEX\2', article)
+          original = papers(s)
+          assert len(original) == 63
+          assert sum(doi(a) == new_doi for a in original) == 0
+          assert sum(doi(a) == old_doi for a in original) == 1
+          assert 'Bibliography compiled from' not in s and 'Bibliografía recopilada de' not in s
+          assert 'Dr. Daniel Cerqueda García' in s
+          article = f'<article class="paper" id="doi-10-1080-29933935-2026-2747503" data-doi="{new_doi}" data-published="2026-10-16" data-collection-year="2027"><span class="paper-index" aria-hidden="true">01</span><div><h3><a href="https://doi.org/{new_doi}" target="_blank" rel="noopener noreferrer">{title}</a></h3><p class="authors">López-Contreras, B. E.; León-Mimila, P.; Villamil-Ramírez, H.; Morán-Ramos, S.; <strong>Cerqueda-García, D.</strong>; Del-Río-Navarro, B. E.; Aguilar-Salinas, C. A.; Villarreal-Molina, T.; Camacho-Barrón, M.; García, O. P.; Canizales-Quinteros, S.</p><p class="journal"><span data-en="Gut Microbes Reports, 4(1), 2747503 · Published online 2026; collection 2027" data-es="Gut Microbes Reports, 4(1), 2747503 · Publicación en línea 2026; colección 2027">Gut Microbes Reports, 4(1), 2747503 · Published online 2026; collection 2027</span><span class="type" data-en="Research article" data-es="Artículo de investigación">Research article</span></p></div><a class="external" href="https://doi.org/{new_doi}" target="_blank" rel="noopener noreferrer" data-title="{title}" aria-label="Open publication: {title}"><span aria-hidden="true">↗</span></a></article>'
+          s, n = re.subn(r'(<details class="year-group" id="year-2026"[^>]*>.*?<div class="year-papers">)', lambda m: m[1] + '\n' + article, s, count=1, flags=re.S)
+          assert n == 1
+          existing = next(a for a in original if doi(a) == old_doi)
+          replacement = existing.replace('<article class="paper" id="rg-414235534">', f'<article class="paper" id="rg-414235534" data-doi="{old_doi}" data-published="2026-09-11">')
+          replacement = replacement.replace('<p class="journal">Animal Microbiome</p>', '<p class="journal">Animal Microbiome (2026)<span class="type" data-en="Research article · Early online publication" data-es="Artículo de investigación · Publicación anticipada en línea">Research article · Early online publication</span></p>')
+          assert replacement != existing and 'data-published="2026-09-11"' in replacement
+          s = s.replace(existing, replacement, 1)
+          counter = iter(range(1, 1000))
+          s, n = re.subn(r'(<span class="paper-index" aria-hidden="true">)\d+(</span>)', lambda m: m[1] + f'{next(counter):02d}' + m[2], s)
+          assert n == 64
+          def recount(m):
+              group = m[0]
+              group, n = re.subn(r'(<span class="count">)\d+(</span>)', lambda c: c[1] + str(len(papers(group))) + c[2], group, count=1)
+              assert n == 1
+              return group
+          s = re.sub(r'<details class="year-group"[^>]*>.*?</details>', recount, s, flags=re.S)
+          years = [int(y) for y in re.findall(r'<details class="year-group" id="year-(\d+)"', s)]
+          summary = f'<p id="pub-summary" data-en="64 publications · {min(years)}–{max(years)}" data-es="64 publicaciones · {min(years)}–{max(years)}">64 publications · {min(years)}–{max(years)}</p>'
+          s, n = re.subn(r'<p id="pub-summary"[^>]*>.*?</p>', lambda m: summary, s, count=1)
+          assert n == 1
+          assert 'bibliography-last-reviewed' not in s
+          s = s.replace('</head>', '  <meta name="bibliography-last-reviewed" content="2026-10-31">\n</head>', 1)
+          updated = papers(s)
+          assert len(updated) == 64
+          for target in [new_doi, old_doi]:
+              assert sum(doi(a) == target for a in updated) == 1
+          dois = [doi(a) for a in updated if doi(a)]
+          assert len(dois) == len(set(dois))
+          ids = re.findall(r'\bid="([^\"]+)"', s)
+          assert len(ids) == len(set(ids))
+          assert re.findall(r'class="paper-index" aria-hidden="true">(\d+)', s) == [f'{i:02d}' for i in range(1, 65)]
+          unchanged = 0
+          for a in original:
+              identifier = re.search(r'\bid="([^\"]+)"', a)[1]
+              match = next(x for x in updated if f'id="{identifier}"' in x)
+              if doi(a) != old_doi:
+                  assert without_index(a) == without_index(match)
+                  unchanged += 1
+              else:
+                  for pattern in [r'<h3>.*?</h3>', r'<p class="authors">.*?</p>']:
+                      assert re.search(pattern, a)[0] == re.search(pattern, match)[0]
+          for tag in ['style', 'script']:
+              pattern = r'<' + tag + r'\b[^>]*>.*?</' + tag + '>'
+              assert re.findall(pattern, before, re.S) == re.findall(pattern, s, re.S)
+          assert re.findall(r'<img\b[^>]*>', before) == re.findall(r'<img\b[^>]*>', s)
+          for section_id in ['home', 'about', 'research', 'contact']:
+              pattern = r'<section\b[^>]*\bid="' + section_id + r'"[^>]*>.*?</section>'
+              assert re.findall(pattern, before, re.S) == re.findall(pattern, s, re.S)
+          counts = {}
+          for group in re.findall(r'<details class="year-group"[^>]*>.*?</details>', s, re.S):
+              year = re.search(r'id="year-(\d+)"', group)[1]
+              actual = len(papers(group))
+              assert int(re.search(r'class="count">(\d+)', group)[1]) == actual
+              counts[year] = actual
+          assert counts['2026'] == 6 and sum(counts.values()) == 64
+          assert 'Bibliography compiled from' not in s and 'Bibliografía recopilada de' not in s
+          assert 'daniel.cerqueda [at] inecol.mx' in s and 'mailto:' not in s
+          output = s.encode('utf-8')
+          report = {'base_commit': '984b8927a4b7a9b5524897bc68528f9399aa98a7', 'base_blob': blob, 'updated_blob': hashlib.sha1(b'blob ' + str(len(output)).encode() + b'\0' + output).hexdigest(), 'total_before': 63, 'total_after': 64, 'new_articles': 1, 'updated_existing_articles': 1, 'unchanged_articles_except_index': unchanged, 'year_counts': counts, 'doi_duplicates': 0, 'html_id_duplicates': 0, 'indices': '01–64', 'images_css_javascript_and_profile_preserved': True, 'reviewed': '2026-10-31'}
+          review = Path('_review-output')
+          review.mkdir()
+          (review / 'base.html').write_bytes(raw)
+          (review / 'index.html').write_bytes(output)
+          (review / 'validation.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+          p.write_bytes(output)
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
+      - name: Commit only the reviewed HTML to the new branch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- index.html
+          git commit -m 'Add verified Gut Microbes Reports publication; refresh bibliography metadata'
+          git push origin HEAD:actualizar-publicaciones-2026-10-31
+      - name: Export exact source and updated HTML for independent checks
+        uses: actions/upload-artifact@v4
+        with:
+          name: perfil-publicaciones-revision-2026-10-31
+          path: _review-output/
+          retention-days: 7
